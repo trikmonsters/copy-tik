@@ -163,12 +163,13 @@ def click_caption(page, description: str):
     close_modal(page)
     time.sleep(1)
 
-    # Selector caption TikTok (DraftEditor)
+    # Selector caption TikTok (Updated berdasarkan repo reference)
     caption_selectors = [
-        "div.public-DraftEditor-content",
-        "div[contenteditable='true'][role='combobox']",
-        "div[contenteditable='true']",
-        "textarea",
+        "[data-e2e='caption-input']",           # Official TikTok attribute (paling reliable)
+        "div.public-DraftEditor-content",       # Draft.js editor
+        "div[contenteditable='true']",          # Generic contenteditable
+        "div[class*='caption']",                # Class-based fallback
+        "textarea",                             # Textarea fallback
     ]
 
     for sel in caption_selectors:
@@ -198,20 +199,24 @@ def click_caption(page, description: str):
 
 
 def click_post_button(page):
-    """Klik tombol Post dengan handle modal."""
+    """Klik tombol Post dengan handle modal dan selector yang lebih robust."""
 
     # Tutup modal dulu jika masih ada
     close_modal(page)
     time.sleep(1)
 
+    # Updated post button selectors berdasarkan repo reference
     post_selectors = [
-        "button:has-text('Post')",
-        "button:has-text('Posting')",
-        "[data-e2e='submit-button']",
-        "div[data-e2e='submit-button']",
-        "button.upload-btn",
-        "button[class*='submit']",
-        "button[class*='post']",
+        "[data-e2e='post_video_button']",       # Official TikTok attribute (paling reliable)
+        "button[data-e2e='submit-button']",     # Alternative official attribute
+        "button:has-text('Post')",              # Text-based fallback (EN)
+        "button:has-text('Posting')",           # Alternative text (EN)
+        "button:has-text('Đăng')",              # Vietnamese
+        "button:has-text('发布')",              # Chinese
+        "div[data-e2e='submit-button']",        # Div wrapper
+        "button.upload-btn",                    # Class-based
+        "button[class*='submit']",              # Class contains submit
+        "button[class*='post']",                # Class contains post
     ]
 
     for sel in post_selectors:
@@ -232,6 +237,37 @@ def click_post_button(page):
             continue
 
     return False
+
+
+def wait_for_upload_complete(page, timeout: int = 120):
+    """Tunggu hingga upload selesai dengan monitoring progress indicators."""
+    log("⏳ Memantau progress upload...")
+    start_time = time.time()
+    
+    progress_selectors = [
+        "[class*='progress']",
+        "[class*='uploading']",
+        "[class*='upload-card-progress']",
+    ]
+
+    while time.time() - start_time < timeout:
+        progress_visible = False
+        
+        for sel in progress_selectors:
+            try:
+                if page.locator(sel).count() > 0:
+                    progress_visible = True
+                    break
+            except Exception:
+                pass
+        
+        if not progress_visible:
+            log("✅ Progress indicator hilang, upload selesai")
+            break
+        
+        time.sleep(2)
+
+    time.sleep(3)  # Extra buffer untuk processing
 
 
 def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
@@ -288,23 +324,26 @@ def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
         log(f"📤 Mengupload file: {video_path}")
         page.locator("input[type='file']").set_input_files(str(video_path.resolve()))
 
-        log("⏳ Menunggu video diproses (15 detik)...")
-        time.sleep(15)
+        log("⏳ Menunggu video diproses...")
+        time.sleep(5)
         screenshot(page, "03_video_diupload")
 
-        # Tutup modal yang muncul setelah upload
+        # ── 5. Tunggu upload complete dengan monitoring ───────────
+        wait_for_upload_complete(page, timeout=120)
+        
+        # Tutup modal yang mungkin muncul setelah upload
         close_modal(page)
         time.sleep(3)
         screenshot(page, "04_setelah_upload_selesai")
 
-        # ── 5. Isi caption ────────────────────────────────────────
+        # ── 6. Isi caption ────────────────────────────────────────
         if description:
             log(f"✏️  Mengisi caption: {description}")
             click_caption(page, description)
             time.sleep(1)
             screenshot(page, "05_caption_diisi")
 
-        # ── 6. Klik Post ──────────────────────────────────────────
+        # ── 7. Klik Post ──────────────────────────────────────────
         log("📮 Mencari dan klik tombol Post...")
         time.sleep(2)
         screenshot(page, "06_sebelum_post")
