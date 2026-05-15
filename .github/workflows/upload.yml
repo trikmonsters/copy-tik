@@ -1,21 +1,16 @@
 name: TikTok Auto Upload
 
 on:
-  # Jalankan manual dari GitHub Actions tab
   workflow_dispatch:
     inputs:
       video_url:
-        description: "URL Video (kosongkan untuk pakai default Pinterest URL)"
+        description: "URL Video"
         required: false
         default: "https://v1.pinimg.com/videos/iht/expMp4/b7/b4/4b/b7b44b6222612c40a5b30fd7e991cb4f_720w.mp4"
       description:
         description: "Caption / Deskripsi Video"
         required: false
         default: "Video keren! #fyp #viral"
-
-  # Atau jadwalkan otomatis (opsional, uncomment untuk aktifkan)
-  # schedule:
-  #   - cron: '0 10 * * *'  # Setiap hari jam 10:00 UTC
 
 jobs:
   upload:
@@ -24,57 +19,42 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # ── Step 1: Checkout Repo ───────────────────────────────────
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      # ── Step 2: Setup Python ────────────────────────────────────
       - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          
 
-      # ── Step 3: Install Dependencies ────────────────────────────
       - name: 📦 Install Dependencies
         run: |
           pip install playwright requests
           playwright install chromium
           playwright install-deps chromium
 
-      # ── Step 4: Setup Cookies dari Secret ───────────────────────
       - name: 🍪 Setup TikTok Cookies
         run: |
-          echo "${{ secrets.TIKTOK_COOKIES }}" > cookies.txt
-          echo "✅ Cookies file dibuat"
-          # Cek cookies tidak kosong
-          if [ ! -s cookies.txt ]; then
-            echo "❌ ERROR: TIKTOK_COOKIES secret kosong!"
-            exit 1
-          fi
-          echo "📄 Jumlah baris cookies: $(wc -l < cookies.txt)"
+          echo '${{ secrets.TIKTOK_COOKIES_JSON }}' > cookies.json
+          echo "✅ cookies.json dibuat"
+          echo "📄 Jumlah cookies: $(python -c "import json; print(len(json.load(open('cookies.json'))))")"
 
-      # ── Step 5: Run Uploader ─────────────────────────────────────
       - name: 🚀 Upload Video ke TikTok
         run: |
           python uploader.py \
-            --url "${{ github.event.inputs.video_url || 'https://v1.pinimg.com/videos/iht/expMp4/b7/b4/4b/b7b44b6222612c40a5b30fd7e991cb4f_720w.mp4' }}" \
-            --description "${{ github.event.inputs.description || 'Video keren! #fyp #viral' }}" \
-            --cookies cookies.txt \
+            --url "${{ github.event.inputs.video_url }}" \
+            --description "${{ github.event.inputs.description }}" \
+            --cookies cookies.json \
             --headless
 
-      # ── Step 6: Upload Screenshots sebagai Artifact ──────────────
-      - name: 📸 Upload Screenshots (Laporan)
-        if: always()  # Jalankan meski ada error, supaya kita punya laporan
+      - name: 📸 Upload Screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tiktok-upload-screenshots-${{ github.run_number }}
           path: screenshots/
           retention-days: 30
 
-      # ── Step 7: Tampilkan Daftar Screenshot ─────────────────────
-      - name: 📋 Daftar Screenshot yang Dihasilkan
+      - name: 📋 Daftar Screenshot
         if: always()
-        run: |
-          echo "=== Screenshot yang dihasilkan ==="
-          ls -la screenshots/ 2>/dev/null || echo "Tidak ada screenshot"
+        run: ls -la screenshots/ 2>/dev/null || echo "Tidak ada screenshot"
