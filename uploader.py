@@ -109,24 +109,41 @@ def fill_caption(page, text):
             if not box.is_visible(timeout=3000):
                 continue
 
+            # focus editor
             box.click(force=True)
 
             time.sleep(1)
 
+            # clear existing text
             page.keyboard.press("Control+a")
             page.keyboard.press("Delete")
 
-            # TYPE SLOWER
-            for char in text:
-                page.keyboard.type(char)
-                time.sleep(0.03)
+            time.sleep(0.5)
 
-            log("✅ Caption filled")
+            # gunakan playwright native sequential typing
+            box.press_sequentially(
+                text,
+                delay=100
+            )
 
-            return True
+            time.sleep(2)
 
-        except:
-            pass
+            # VALIDASI
+            current_text = box.inner_text()
+
+            log(f"📝 Caption result: {current_text}")
+
+            if text.split()[0] in current_text:
+
+                log("✅ Caption filled")
+
+                return True
+
+        except Exception as e:
+
+            log(f"⚠️ Caption failed: {e}")
+
+            continue
 
     return False
 
