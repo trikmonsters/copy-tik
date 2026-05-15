@@ -109,35 +109,46 @@ def fill_caption(page, text):
             if not box.is_visible(timeout=3000):
                 continue
 
-            # focus editor
             box.click(force=True)
 
             time.sleep(1)
 
-            # clear existing text
+            # clear
             page.keyboard.press("Control+a")
             page.keyboard.press("Delete")
 
-            time.sleep(0.5)
+            words = text.split()
 
-            # gunakan playwright native sequential typing
-            box.press_sequentially(
-                text,
-                delay=100
-            )
+            for word in words:
+
+                # HASHTAG
+                if word.startswith("#"):
+
+                    # ketik hashtag perlahan
+                    box.press_sequentially(
+                        word,
+                        delay=120
+                    )
+
+                    time.sleep(2)
+
+                    # pilih suggestion hashtag
+                    page.keyboard.press("Enter")
+
+                    time.sleep(1)
+
+                else:
+
+                    box.press_sequentially(
+                        word + " ",
+                        delay=80
+                    )
 
             time.sleep(2)
 
-            # VALIDASI
-            current_text = box.inner_text()
+            log("✅ Caption filled")
 
-            log(f"📝 Caption result: {current_text}")
-
-            if text.split()[0] in current_text:
-
-                log("✅ Caption filled")
-
-                return True
+            return True
 
         except Exception as e:
 
@@ -146,7 +157,6 @@ def fill_caption(page, text):
             continue
 
     return False
-
 
 def click_post(page):
 
