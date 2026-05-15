@@ -11,9 +11,8 @@ import time
 import requests
 import argparse
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
-# ─── Konfigurasi ─────────────────────────────────────────────────
 TIKTOK_UPLOAD_URL = "https://www.tiktok.com/upload?lang=en"
 SCREENSHOT_DIR = Path("screenshots")
 VIDEO_FILE = Path("video.mp4")
@@ -44,18 +43,12 @@ def download_video(url: str, output: Path):
 
 
 def parse_cookies(cookies_path: str) -> list:
-    """
-    Support 2 format:
-      - JSON  : export dari Cookie Editor browser extension
-      - Netscape : format .txt tab-separated
-    """
     with open(cookies_path, "r", encoding="utf-8") as f:
         content = f.read().strip()
 
     cookies = []
 
     if content.startswith("["):
-        # Format JSON (Cookie Editor)
         raw = json.loads(content)
         for c in raw:
             expiry = c.get("expirationDate") or c.get("expires") or -1
@@ -70,7 +63,6 @@ def parse_cookies(cookies_path: str) -> list:
             })
         log(f"🍪 Format JSON — memuat {len(cookies)} cookies")
     else:
-        # Format Netscape .txt
         for line in content.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
@@ -89,7 +81,6 @@ def parse_cookies(cookies_path: str) -> list:
             })
         log(f"🍪 Format Netscape — memuat {len(cookies)} cookies")
 
-    # Tambah/override sessionid dari env jika ada
     session_id = os.environ.get("TIKTOK_SESSION_ID", "")
     if session_id:
         cookies = [c for c in cookies if c["name"] != "sessionid"]
@@ -105,6 +96,21 @@ def parse_cookies(cookies_path: str) -> list:
         log("🔑 sessionid dari env TIKTOK_SESSION_ID ditambahkan")
 
     return cookies
+
+
+def goto_with_retry(page, url: str, retries: int = 3):
+    """Buka URL dengan retry, pakai domcontentloaded agar tidak timeout."""
+    for attempt in range(1, retries + 1):
+        try:
+            log(f"🌐 Membuka halaman (percobaan {attempt}/{retries})...")
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            # Tunggu sebentar agar JS halaman sempat jalan
+            time.sleep(5)
+            return
+        except PlaywrightTimeout:
+            log(f"⚠️  Timeout percobaan {attempt}, mencoba lagi...")
+            time.sleep(3)
+    raise Exception(f"❌ Gagal membuka {url} setelah {retries} percobaan")
 
 
 def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
@@ -134,16 +140,23 @@ def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
 
         page = context.new_page()
 
-        log("🔗 Membuka halaman upload TikTok...")
-        page.goto(TIKTOK_UPLOAD_URL, wait_until="networkidle", timeout=60000)
-        time.sleep(3)
+        # Buka halaman upload dengan retry
+        goto_with_retry(page, TIKTOK_UPLOAD_URL)
         screenshot(page, "01_halaman_upload")
+        log(f"📍 URL saat ini: {page.url}")
 
         if "login" in page.url.lower():
             screenshot(page, "error_tidak_login")
             raise Exception("❌ Tidak terdeteksi login. Periksa cookies Anda!")
 
         log("✅ Login terdeteksi")
+
+        # Tunggu halaman upload benar-benar siap
+        try:
+            page.wait_for_selector("input[type='file']", timeout=30000)
+        except PlaywrightTimeout:
+            screenshot(page, "error_input_file_tidak_ada")
+            raise Exception("❌ Input file tidak ditemukan di halaman upload")
 
         log(f"📤 Mengupload file: {video_path}")
         page.locator("input[type='file']").set_input_files(str(video_path.resolve()))
@@ -186,7 +199,7 @@ def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
                 if btn.is_visible():
                     screenshot(page, "05_sebelum_post")
                     btn.click()
-                    log(f"✅ Tombol Post diklik")
+                    log("✅ Tombol Post diklik")
                     time.sleep(8)
                     screenshot(page, "06_setelah_post")
                     log("🎉 Upload selesai!")
