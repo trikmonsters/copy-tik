@@ -47,7 +47,6 @@ def parse_cookies(cookies_path: str) -> list:
         content = f.read().strip()
 
     cookies = []
-
     if content.startswith("["):
         raw = json.loads(content)
         for c in raw:
@@ -93,24 +92,146 @@ def parse_cookies(cookies_path: str) -> list:
             "expires": 2147483647,
             "httpOnly": True,
         })
-        log("🔑 sessionid dari env TIKTOK_SESSION_ID ditambahkan")
+        log("🔑 sessionid dari env ditambahkan")
 
     return cookies
 
 
 def goto_with_retry(page, url: str, retries: int = 3):
-    """Buka URL dengan retry, pakai domcontentloaded agar tidak timeout."""
     for attempt in range(1, retries + 1):
         try:
             log(f"🌐 Membuka halaman (percobaan {attempt}/{retries})...")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            # Tunggu sebentar agar JS halaman sempat jalan
             time.sleep(5)
             return
         except PlaywrightTimeout:
             log(f"⚠️  Timeout percobaan {attempt}, mencoba lagi...")
             time.sleep(3)
     raise Exception(f"❌ Gagal membuka {url} setelah {retries} percobaan")
+
+
+def close_modal(page):
+    """Tutup modal/popup yang menghalangi interaksi."""
+    modal_closed = False
+
+    # Coba klik tombol close modal (×)
+    close_selectors = [
+        "[data-e2e='modal-close-inner-button']",
+        "button[aria-label='Close']",
+        "button.TUXModal-closeButton",
+        ".modal-close",
+        "[class*='closeButton']",
+        "[class*='close-button']",
+        "button:has-text('Close')",
+        "button:has-text('Got it')",
+        "button:has-text('OK')",
+        "button:has-text('Mengerti')",
+        "button:has-text('Oke')",
+    ]
+
+    for sel in close_selectors:
+        try:
+            btn = page.locator(sel).first
+            if btn.is_visible(timeout=1000):
+                btn.click()
+                log(f"✅ Modal ditutup via: {sel}")
+                time.sleep(1)
+                modal_closed = True
+                break
+        except Exception:
+            continue
+
+    # Kalau tidak ada tombol close, coba tekan Escape
+    if not modal_closed:
+        try:
+            overlay = page.locator(".TUXModal-overlay, [class*='modal-overlay'], [class*='modal-desc']").first
+            if overlay.is_visible(timeout=1000):
+                page.keyboard.press("Escape")
+                log("✅ Modal ditutup via Escape")
+                time.sleep(1)
+                modal_closed = True
+        except Exception:
+            pass
+
+    return modal_closed
+
+
+def click_caption(page, description: str):
+    """Isi caption dengan handle modal yang menghalangi."""
+
+    # Tutup modal dulu jika ada
+    close_modal(page)
+    time.sleep(1)
+
+    # Selector caption TikTok (DraftEditor)
+    caption_selectors = [
+        "div.public-DraftEditor-content",
+        "div[contenteditable='true'][role='combobox']",
+        "div[contenteditable='true']",
+        "textarea",
+    ]
+
+    for sel in caption_selectors:
+        try:
+            box = page.locator(sel).first
+            if not box.is_visible(timeout=3000):
+                continue
+
+            # Klik dengan force=True untuk bypass elemen yang menghalangi
+            box.click(force=True)
+            time.sleep(0.5)
+
+            # Kosongkan dulu lalu isi
+            box.select_all()
+            page.keyboard.press("Control+a")
+            page.keyboard.press("Delete")
+            page.keyboard.type(description, delay=50)
+
+            log(f"✅ Caption berhasil diisi via: {sel}")
+            return True
+        except Exception as e:
+            log(f"⚠️  Selector {sel} gagal: {e}")
+            continue
+
+    log("⚠️  Semua selector caption gagal, lanjut tanpa caption")
+    return False
+
+
+def click_post_button(page):
+    """Klik tombol Post dengan handle modal."""
+
+    # Tutup modal dulu jika masih ada
+    close_modal(page)
+    time.sleep(1)
+
+    post_selectors = [
+        "button:has-text('Post')",
+        "button:has-text('Posting')",
+        "[data-e2e='submit-button']",
+        "div[data-e2e='submit-button']",
+        "button.upload-btn",
+        "button[class*='submit']",
+        "button[class*='post']",
+    ]
+
+    for sel in post_selectors:
+        try:
+            btn = page.locator(sel).first
+            if btn.is_visible(timeout=3000):
+                # Scroll ke tombol dulu
+                btn.scroll_into_view_if_needed()
+                time.sleep(0.5)
+                # Klik dengan force jika perlu
+                try:
+                    btn.click(timeout=5000)
+                except Exception:
+                    btn.click(force=True)
+                log(f"✅ Tombol Post diklik via: {sel}")
+                return True
+        except Exception:
+            continue
+
+    return False
 
 
 def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
@@ -140,74 +261,62 @@ def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
 
         page = context.new_page()
 
-        # Buka halaman upload dengan retry
+        # ── 1. Buka halaman upload ────────────────────────────────
         goto_with_retry(page, TIKTOK_UPLOAD_URL)
         screenshot(page, "01_halaman_upload")
-        log(f"📍 URL saat ini: {page.url}")
+        log(f"📍 URL: {page.url}")
 
         if "login" in page.url.lower():
             screenshot(page, "error_tidak_login")
-            raise Exception("❌ Tidak terdeteksi login. Periksa cookies Anda!")
+            raise Exception("❌ Tidak terdeteksi login. Periksa cookies!")
 
         log("✅ Login terdeteksi")
 
-        # Tunggu halaman upload benar-benar siap
+        # ── 2. Tutup modal awal jika ada ──────────────────────────
+        log("🔍 Memeriksa modal awal...")
+        close_modal(page)
+        screenshot(page, "02_setelah_tutup_modal_awal")
+
+        # ── 3. Tunggu input file siap ─────────────────────────────
         try:
             page.wait_for_selector("input[type='file']", timeout=30000)
         except PlaywrightTimeout:
             screenshot(page, "error_input_file_tidak_ada")
-            raise Exception("❌ Input file tidak ditemukan di halaman upload")
+            raise Exception("❌ Input file tidak ditemukan")
 
+        # ── 4. Upload video ───────────────────────────────────────
         log(f"📤 Mengupload file: {video_path}")
         page.locator("input[type='file']").set_input_files(str(video_path.resolve()))
 
-        log("⏳ Menunggu video diproses...")
-        time.sleep(10)
-        screenshot(page, "02_video_diupload")
+        log("⏳ Menunggu video diproses (15 detik)...")
+        time.sleep(15)
+        screenshot(page, "03_video_diupload")
 
-        try:
-            page.wait_for_selector(".upload-progress", state="hidden", timeout=60000)
-        except Exception:
-            pass
+        # Tutup modal yang muncul setelah upload
+        close_modal(page)
+        time.sleep(3)
+        screenshot(page, "04_setelah_upload_selesai")
 
-        time.sleep(5)
-        screenshot(page, "03_setelah_upload")
-
+        # ── 5. Isi caption ────────────────────────────────────────
         if description:
             log(f"✏️  Mengisi caption: {description}")
-            try:
-                box = page.locator("div[contenteditable='true'], textarea").first
-                box.click()
-                time.sleep(1)
-                box.fill(description)
-                time.sleep(1)
-                screenshot(page, "04_caption_diisi")
-            except Exception as e:
-                log(f"⚠️  Gagal isi caption: {e}")
+            click_caption(page, description)
+            time.sleep(1)
+            screenshot(page, "05_caption_diisi")
 
-        log("📮 Mencari tombol Post...")
-        time.sleep(3)
+        # ── 6. Klik Post ──────────────────────────────────────────
+        log("📮 Mencari dan klik tombol Post...")
+        time.sleep(2)
+        screenshot(page, "06_sebelum_post")
 
-        for selector in [
-            "button:has-text('Post')",
-            "button:has-text('Posting')",
-            "[data-e2e='submit-button']",
-            "button.upload-btn",
-        ]:
-            try:
-                btn = page.locator(selector).first
-                if btn.is_visible():
-                    screenshot(page, "05_sebelum_post")
-                    btn.click()
-                    log("✅ Tombol Post diklik")
-                    time.sleep(8)
-                    screenshot(page, "06_setelah_post")
-                    log("🎉 Upload selesai!")
-                    break
-            except Exception:
-                continue
+        posted = click_post_button(page)
+
+        if posted:
+            time.sleep(8)
+            screenshot(page, "07_setelah_post")
+            log("🎉 Upload selesai!")
         else:
-            screenshot(page, "05_tombol_post_tidak_ditemukan")
+            screenshot(page, "07_tombol_post_tidak_ditemukan")
             log("⚠️  Tombol Post tidak ditemukan, cek screenshot!")
 
         browser.close()
