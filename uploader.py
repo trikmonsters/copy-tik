@@ -33,22 +33,7 @@ def download_video(url):
 
     log("✅ Video downloaded")
 
-
-def prepare_video(source):
-
-    if source.startswith("http://") or source.startswith("https://"):
-
-        download_video(source)
-
-    else:
-
-        path = Path(source.replace("file://", ""))
-
-        VIDEO_FILE.write_bytes(
-            path.read_bytes()
-        )
-
-        log("✅ Local video loaded")
+    return VIDEO_FILE
 
 
 def load_cookies(path):
@@ -85,8 +70,6 @@ def close_popup(page):
         "button:has-text('Cancel')",
         "button:has-text('Got it')",
         "button:has-text('Close')",
-        "button:has-text('Skip')",
-        "button:has-text('Not now')",
     ]
 
     for selector in popup_buttons:
@@ -99,7 +82,7 @@ def close_popup(page):
 
                 button.click(force=True)
 
-                log(f"✅ Popup closed")
+                log(f"✅ Popup closed: {selector}")
 
                 time.sleep(1)
 
@@ -231,7 +214,7 @@ def click_post(page):
 
 def upload_video(url, cookies_path, caption, headless=True):
 
-    prepare_video(url)
+    download_video(url)
 
     with sync_playwright() as p:
 
@@ -284,14 +267,9 @@ def upload_video(url, cookies_path, caption, headless=True):
 
         log("⏳ Waiting upload process...")
 
-        time.sleep(35)
+        time.sleep(25)
 
         close_popup(page)
-
-        # REMOVE RANDOM DEFAULT TEXT
-        page.mouse.click(200, 200)
-
-        time.sleep(1)
 
         fill_caption(page, caption)
 
