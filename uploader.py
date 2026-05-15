@@ -1,7 +1,7 @@
 """
-TikTok Uploader - Simple Version
+TikTok Uploader - Stable Version
 Upload video dari URL ke TikTok menggunakan Playwright
-Support cookies format: JSON (Cookie Editor) atau Netscape (.txt)
+Support cookies JSON + handle content check popup
 """
 
 import os
@@ -10,10 +10,15 @@ import json
 import time
 import requests
 import argparse
+
 from pathlib import Path
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import (
+    sync_playwright,
+    TimeoutError as PlaywrightTimeout
+)
 
 TIKTOK_UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
+
 SCREENSHOT_DIR = Path("screenshots")
 VIDEO_FILE = Path("video.mp4")
 
@@ -24,422 +29,543 @@ def log(msg: str):
 
 def screenshot(page, name: str):
     SCREENSHOT_DIR.mkdir(exist_ok=True)
+
     path = SCREENSHOT_DIR / f"{name}.png"
-    page.screenshot(path=str(path), full_page=False)
+
+    page.screenshot(
+        path=str(path),
+        full_page=False
+    )
+
     log(f"📸 Screenshot disimpan: {path}")
 
 
 def download_video(url: str, output: Path):
-    log(f"⬇️  Mendownload video dari: {url}")
-    response = requests.get(url, stream=True, timeout=60, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    })
+
+    log(f"⬇️ Mendownload video dari: {url}")
+
+    response = requests.get(
+        url,
+        stream=True,
+        timeout=60,
+        headers={
+            "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+    )
+
     response.raise_for_status()
+
     with open(output, "wb") as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
+
     size_mb = output.stat().st_size / (1024 * 1024)
-    log(f"✅ Video berhasil didownload ({size_mb:.1f} MB) → {output}")
+
+    log(f"✅ Video berhasil didownload ({size_mb:.1f} MB)")
 
 
 def parse_cookies(cookies_path: str) -> list:
+
     with open(cookies_path, "r", encoding="utf-8") as f:
         content = f.read().strip()
 
     cookies = []
+
+    # JSON FORMAT
     if content.startswith("["):
+
         raw = json.loads(content)
+
         for c in raw:
-            expiry = c.get("expirationDate") or c.get("expires") or -1
+
+            expiry = (
+                c.get("expirationDate")
+                or c.get("expires")
+                or -1
+            )
+
             cookies.append({
-                "name":     c["name"],
-                "value":    c["value"],
-                "domain":   c["domain"],
-                "path":     c.get("path", "/"),
-                "secure":   c.get("secure", False),
-                "expires":  int(expiry),
+                "name": c["name"],
+                "value": c["value"],
+                "domain": c["domain"],
+                "path": c.get("path", "/"),
+                "secure": c.get("secure", False),
+                "expires": int(expiry),
                 "httpOnly": c.get("httpOnly", False),
             })
-        log(f"🍪 Format JSON — memuat {len(cookies)} cookies")
-    else:
-        for line in content.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split("\t")
-            if len(parts) < 7:
-                continue
-            domain, _, path, secure, expiry, name, value = parts[:7]
-            cookies.append({
-                "name":   name,
-                "value":  value,
-                "domain": domain,
-                "path":   path,
-                "secure": secure.upper() == "TRUE",
-                "expires": int(expiry) if expiry.isdigit() else -1,
-            })
-        log(f"🍪 Format Netscape — memuat {len(cookies)} cookies")
 
-    session_id = os.environ.get("TIKTOK_SESSION_ID", "")
-    if session_id:
-        cookies = [c for c in cookies if c["name"] != "sessionid"]
-        cookies.append({
-            "name":    "sessionid",
-            "value":   session_id,
-            "domain":  ".tiktok.com",
-            "path":    "/",
-            "secure":  True,
-            "expires": 2147483647,
-            "httpOnly": True,
-        })
-        log("🔑 sessionid dari env ditambahkan")
+        log(f"🍪 JSON cookies dimuat ({len(cookies)})")
+
+    else:
+        raise Exception("❌ Gunakan format cookies JSON")
 
     return cookies
 
 
 def goto_with_retry(page, url: str, retries: int = 3):
+
     for attempt in range(1, retries + 1):
+
         try:
-            log(f"🌐 Membuka halaman (percobaan {attempt}/{retries})...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+            log(f"🌐 Membuka halaman ({attempt}/{retries})")
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
             time.sleep(5)
+
             return
+
         except PlaywrightTimeout:
-            log(f"⚠️  Timeout percobaan {attempt}, mencoba lagi...")
+
+            log(f"⚠️ Timeout percobaan {attempt}")
+
             time.sleep(3)
-    raise Exception(f"❌ Gagal membuka {url} setelah {retries} percobaan")
+
+    raise Exception(f"❌ Gagal membuka halaman")
 
 
 def close_modal(page):
-    """Tutup modal/popup yang menghalangi interaksi."""
-    modal_closed = False
 
-    # Coba klik tombol close modal (×)
     close_selectors = [
         "[data-e2e='modal-close-inner-button']",
         "button[aria-label='Close']",
-        "button.TUXModal-closeButton",
-        ".modal-close",
-        "[class*='closeButton']",
-        "[class*='close-button']",
         "button:has-text('Close')",
         "button:has-text('Got it')",
         "button:has-text('OK')",
-        "button:has-text('Mengerti')",
-        "button:has-text('Oke')",
+        "button:has-text('Cancel')",
     ]
 
     for sel in close_selectors:
+
         try:
+
             btn = page.locator(sel).first
-            if btn.is_visible(timeout=1000):
-                btn.click()
+
+            if btn.is_visible(timeout=1500):
+
+                btn.click(force=True)
+
                 log(f"✅ Modal ditutup via: {sel}")
+
                 time.sleep(1)
-                modal_closed = True
-                break
+
+                return True
+
         except Exception:
             continue
 
-    # Kalau tidak ada tombol close, coba tekan Escape
-    if not modal_closed:
-        try:
-            overlay = page.locator(".TUXModal-overlay, [class*='modal-overlay'], [class*='modal-desc']").first
-            if overlay.is_visible(timeout=1000):
-                page.keyboard.press("Escape")
-                log("✅ Modal ditutup via Escape")
-                time.sleep(1)
-                modal_closed = True
-        except Exception:
-            pass
+    return False
 
-    return modal_closed
+
+def handle_content_check_popup(page):
+
+    try:
+
+        log("🔍 Memeriksa popup content check...")
+
+        popup_selectors = [
+            "text=Turn on automatic content checks",
+            "text=Music copyright check",
+            "text=Content check lite",
+        ]
+
+        popup_found = False
+
+        for sel in popup_selectors:
+
+            try:
+
+                if page.locator(sel).first.is_visible(timeout=3000):
+                    popup_found = True
+                    break
+
+            except:
+                continue
+
+        if not popup_found:
+
+            log("✅ Tidak ada popup content check")
+
+            return False
+
+        screenshot(page, "popup_content_check")
+
+        cancel_selectors = [
+            "button:has-text('Cancel')",
+            "button:has-text('Skip')",
+            "button:has-text('Not now')",
+        ]
+
+        for sel in cancel_selectors:
+
+            try:
+
+                btn = page.locator(sel).first
+
+                if btn.is_visible(timeout=3000):
+
+                    btn.click(force=True)
+
+                    log(f"✅ Popup ditutup via: {sel}")
+
+                    time.sleep(2)
+
+                    screenshot(page, "popup_closed")
+
+                    return True
+
+            except:
+                continue
+
+        page.keyboard.press("Escape")
+
+        log("✅ Popup ditutup via Escape")
+
+        time.sleep(2)
+
+        return True
+
+    except Exception as e:
+
+        log(f"⚠️ Error popup: {e}")
+
+        return False
 
 
 def find_upload_input(page):
-    """Cari input file, handle hidden state dan iframe."""
-    log("🔍 Mencari file input element...")
-    
-    # ─── Attempt 1: Direct input in main page ───────────────────
+
+    log("🔍 Mencari input upload...")
+
     try:
-        file_input = page.locator("input[type='file']").first
-        # Tunggu hingga attached (bukan visible, karena mungkin hidden)
-        file_input.wait_for(state="attached", timeout=10000)
-        log("✅ File input ditemukan di main page")
+
+        file_input = page.locator(
+            "input[type='file']"
+        ).first
+
+        file_input.wait_for(
+            state="attached",
+            timeout=15000
+        )
+
+        log("✅ File input ditemukan")
+
         return file_input
+
     except Exception as e:
-        log(f"⚠️  File input di main page tidak ditemukan: {e}")
 
-    # ─── Attempt 2: Check dalam iframe ───────────────────────────
-    try:
-        frames = page.frames
-        log(f"📍 Total frames: {len(frames)}")
-        
-        for i, frame in enumerate(frames):
-            try:
-                frame_url = frame.url if hasattr(frame, 'url') else 'unknown'
-                log(f"   Frame {i}: {frame_url}")
-                
-                file_input = frame.locator("input[type='file']").first
-                file_input.wait_for(state="attached", timeout=5000)
-                log(f"✅ File input ditemukan di frame {i}")
-                return file_input
-            except Exception:
-                continue
-    except Exception as e:
-        log(f"⚠️  Error checking frames: {e}")
-
-    # ─── Attempt 3: Klik area upload dulu untuk reveal input ─────
-    try:
-        log("🎯 Klik area upload untuk reveal file input...")
-        upload_area_selectors = [
-            "[data-e2e='upload-area']",
-            "[class*='upload']",
-            "div[class*='drag-drop']",
-            "div[class*='dropzone']",
-            ".upload-area",
-            ".jsx-2094875959",  # Dari error message
-        ]
-        
-        for sel in upload_area_selectors:
-            try:
-                area = page.locator(sel).first
-                if area.is_visible(timeout=2000):
-                    area.click()
-                    log(f"✅ Klik upload area via: {sel}")
-                    time.sleep(1)
-                    break
-            except Exception:
-                continue
-
-        # Coba lagi cari input file
-        file_input = page.locator("input[type='file']").first
-        file_input.wait_for(state="attached", timeout=10000)
-        log("✅ File input ditemukan setelah klik area upload")
-        return file_input
-    except Exception as e:
-        log(f"⚠️  Error setelah klik area: {e}")
-
-    raise Exception("❌ Input file tidak ditemukan di manapun")
+        raise Exception(
+            f"❌ Input upload tidak ditemukan: {e}"
+        )
 
 
-def click_caption(page, description: str):
-    """Isi caption dengan handle modal yang menghalangi."""
+def wait_for_upload_complete(page, timeout=180):
 
-    # Tutup modal dulu jika ada
-    close_modal(page)
-    time.sleep(1)
+    log("⏳ Menunggu upload selesai...")
 
-    # Selector caption TikTok (Updated berdasarkan repo reference)
-    caption_selectors = [
-        "[data-e2e='caption-input']",           # Official TikTok attribute (paling reliable)
-        "div.public-DraftEditor-content",       # Draft.js editor
-        "div[contenteditable='true']",          # Generic contenteditable
-        "div[class*='caption']",                # Class-based fallback
-        "textarea",                             # Textarea fallback
+    start = time.time()
+
+    progress_selectors = [
+        "[class*='progress']",
+        "[class*='uploading']",
+        "[class*='Progress']",
     ]
 
-    for sel in caption_selectors:
+    while time.time() - start < timeout:
+
+        uploading = False
+
+        for sel in progress_selectors:
+
+            try:
+
+                if page.locator(sel).count() > 0:
+                    uploading = True
+                    break
+
+            except:
+                pass
+
+        if not uploading:
+
+            log("✅ Upload selesai")
+
+            break
+
+        time.sleep(2)
+
+    time.sleep(5)
+
+
+def fill_caption(page, description):
+
+    log("✏️ Mengisi caption...")
+
+    selectors = [
+        "[data-e2e='caption-input']",
+        "div.public-DraftEditor-content",
+        "div[contenteditable='true']",
+        "textarea",
+    ]
+
+    for sel in selectors:
+
         try:
+
             box = page.locator(sel).first
+
             if not box.is_visible(timeout=3000):
                 continue
 
-            # Klik dengan force=True untuk bypass elemen yang menghalangi
             box.click(force=True)
-            time.sleep(0.5)
 
-            # Kosongkan dulu lalu isi
-            box.select_all()
+            time.sleep(1)
+
             page.keyboard.press("Control+a")
             page.keyboard.press("Delete")
-            page.keyboard.type(description, delay=50)
 
-            log(f"✅ Caption berhasil diisi via: {sel}")
+            page.keyboard.type(
+                description,
+                delay=50
+            )
+
+            log(f"✅ Caption berhasil via: {sel}")
+
             return True
+
         except Exception as e:
-            log(f"⚠️  Selector {sel} gagal: {e}")
+
+            log(f"⚠️ Caption selector gagal: {sel}")
+
             continue
 
-    log("⚠️  Semua selector caption gagal, lanjut tanpa caption")
     return False
 
 
 def click_post_button(page):
-    """Klik tombol Post dengan handle modal dan selector yang lebih robust."""
 
-    # Tutup modal dulu jika masih ada
-    close_modal(page)
-    time.sleep(1)
+    log("📮 Mencari tombol Post...")
 
-    # Updated post button selectors berdasarkan repo reference
-    post_selectors = [
-        "[data-e2e='post_video_button']",       # Official TikTok attribute (paling reliable)
-        "button[data-e2e='submit-button']",     # Alternative official attribute
-        "button:has-text('Post')",              # Text-based fallback (EN)
-        "button:has-text('Posting')",           # Alternative text (EN)
-        "button:has-text('Đăng')",              # Vietnamese
-        "button:has-text('发布')",              # Chinese
-        "div[data-e2e='submit-button']",        # Div wrapper
-        "button.upload-btn",                    # Class-based
-        "button[class*='submit']",              # Class contains submit
-        "button[class*='post']",                # Class contains post
+    selectors = [
+        "[data-e2e='post_video_button']",
+        "button[data-e2e='submit-button']",
+        "button:has-text('Post')",
+        "button:has-text('Posting')",
     ]
 
-    for sel in post_selectors:
+    for sel in selectors:
+
         try:
+
             btn = page.locator(sel).first
-            if btn.is_visible(timeout=3000):
-                # Scroll ke tombol dulu
-                btn.scroll_into_view_if_needed()
-                time.sleep(0.5)
-                # Klik dengan force jika perlu
-                try:
-                    btn.click(timeout=5000)
-                except Exception:
-                    btn.click(force=True)
-                log(f"✅ Tombol Post diklik via: {sel}")
-                return True
+
+            if not btn.is_visible(timeout=3000):
+                continue
+
+            disabled = btn.get_attribute("disabled")
+
+            if disabled is not None:
+
+                log("⏳ Tombol Post masih disabled")
+
+                continue
+
+            btn.scroll_into_view_if_needed()
+
+            time.sleep(1)
+
+            try:
+                btn.click(timeout=5000)
+            except:
+                btn.click(force=True)
+
+            log(f"✅ Tombol Post diklik via: {sel}")
+
+            return True
+
         except Exception:
             continue
 
     return False
 
 
-def wait_for_upload_complete(page, timeout: int = 120):
-    """Tunggu hingga upload selesai dengan monitoring progress indicators."""
-    log("⏳ Memantau progress upload...")
-    start_time = time.time()
-    
-    progress_selectors = [
-        "[class*='progress']",
-        "[class*='uploading']",
-        "[class*='upload-card-progress']",
-    ]
+def upload_to_tiktok(
+    video_path,
+    cookies_path,
+    description="",
+    headless=True
+):
 
-    while time.time() - start_time < timeout:
-        progress_visible = False
-        
-        for sel in progress_selectors:
-            try:
-                if page.locator(sel).count() > 0:
-                    progress_visible = True
-                    break
-            except Exception:
-                pass
-        
-        if not progress_visible:
-            log("✅ Progress indicator hilang, upload selesai")
-            break
-        
-        time.sleep(2)
-
-    time.sleep(3)  # Extra buffer untuk processing
-
-
-def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
     with sync_playwright() as p:
-        log("🌐 Membuka browser Chrome...")
+
+        log("🌐 Membuka browser...")
+
         browser = p.chromium.launch(
             headless=headless,
             args=[
                 "--no-sandbox",
-                "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
-            ],
+            ]
         )
+
         context = browser.new_context(
-            viewport={"width": 1280, "height": 900},
+            viewport={
+                "width": 1400,
+                "height": 900
+            },
             user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Mozilla/5.0 "
+                "(Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
         )
 
-        log(f"🍪 Memuat cookies dari: {cookies_path}")
+        log(f"🍪 Memuat cookies: {cookies_path}")
+
         cookies = parse_cookies(cookies_path)
+
         context.add_cookies(cookies)
 
         page = context.new_page()
 
-        # ── 1. Buka halaman upload ────────────────────────────────
-        goto_with_retry(page, TIKTOK_UPLOAD_URL)
-        screenshot(page, "01_halaman_upload")
-        log(f"📍 URL: {page.url}")
+        # OPEN PAGE
+        goto_with_retry(
+            page,
+            TIKTOK_UPLOAD_URL
+        )
+
+        screenshot(page, "01_upload_page")
 
         if "login" in page.url.lower():
-            screenshot(page, "error_tidak_login")
-            raise Exception("❌ Tidak terdeteksi login. Periksa cookies!")
 
-        log("✅ Login terdeteksi")
+            screenshot(page, "error_login")
 
-        # ── 2. Tutup modal awal jika ada ──────────────────────────
-        log("🔍 Memeriksa modal awal...")
+            raise Exception(
+                "❌ Login gagal, cookies invalid"
+            )
+
+        log("✅ Login berhasil")
+
+        # CLOSE INITIAL MODAL
         close_modal(page)
-        screenshot(page, "02_setelah_tutup_modal_awal")
 
-        # ── 3. Cari dan tunggu input file siap ─────────────────────
-        log("⏳ Mencari dan menunggu file input element...")
+        screenshot(page, "02_after_modal")
+
+        # FIND INPUT
         file_input = find_upload_input(page)
-        screenshot(page, "03_file_input_found")
 
-        # ── 4. Upload video ───────────────────────────────────────
-        log(f"📤 Mengupload file: {video_path}")
-        file_input.set_input_files(str(video_path.resolve()))
+        screenshot(page, "03_input_found")
 
-        log("⏳ Menunggu video diproses...")
+        # UPLOAD VIDEO
+        log(f"📤 Uploading: {video_path}")
+
+        file_input.set_input_files(
+            str(video_path.resolve())
+        )
+
         time.sleep(5)
-        screenshot(page, "04_video_diupload")
 
-        # ── 5. Tunggu upload complete dengan monitoring ───────────
-        wait_for_upload_complete(page, timeout=120)
-        
-        # Tutup modal yang mungkin muncul setelah upload
+        screenshot(page, "04_video_uploaded")
+
+        # WAIT PROCESSING
+        wait_for_upload_complete(page)
+
+        screenshot(page, "05_upload_complete")
+
+        # CLOSE POPUPS
         close_modal(page)
-        time.sleep(3)
-        screenshot(page, "05_setelah_upload_selesai")
 
-        # ── 6. Isi caption ────────────────────────────────────────
+        handle_content_check_popup(page)
+
+        screenshot(page, "06_after_popup")
+
+        # FILL CAPTION
         if description:
-            log(f"✏️  Mengisi caption: {description}")
-            click_caption(page, description)
-            time.sleep(1)
-            screenshot(page, "06_caption_diisi")
 
-        # ── 7. Klik Post ──────────────────────────────────────────
-        log("📮 Mencari dan klik tombol Post...")
-        time.sleep(2)
-        screenshot(page, "07_sebelum_post")
+            fill_caption(page, description)
+
+            time.sleep(2)
+
+            screenshot(page, "07_caption")
+
+        # POST
+        time.sleep(3)
+
+        screenshot(page, "08_before_post")
 
         posted = click_post_button(page)
 
         if posted:
-            time.sleep(8)
-            screenshot(page, "08_setelah_post")
-            log("🎉 Upload selesai!")
+
+            log("⏳ Menunggu redirect setelah post...")
+
+            time.sleep(15)
+
+            screenshot(page, "09_post_success")
+
+            log("🎉 UPLOAD SUCCESS")
+
         else:
-            screenshot(page, "08_tombol_post_tidak_ditemukan")
-            log("⚠️  Tombol Post tidak ditemukan, cek screenshot!")
+
+            screenshot(page, "09_post_failed")
+
+            log("❌ Tombol Post gagal ditemukan")
 
         browser.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="TikTok Uploader Simple")
-    parser.add_argument("--url", default="https://v1.pinimg.com/videos/iht/expMp4/b7/b4/4b/b7b44b6222612c40a5b30fd7e991cb4f_720w.mp4")
-    parser.add_argument("--cookies", default="cookies.json")
-    parser.add_argument("--description", default="Video keren! #fyp #viral")
-    parser.add_argument("--headless", action="store_true", default=True)
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--url",
+        default="https://v1.pinimg.com/videos/iht/expMp4/b7/b4/4b/b7b44b6222612c40a5b30fd7e991cb4f_720w.mp4"
+    )
+
+    parser.add_argument(
+        "--cookies",
+        default="cookies.json"
+    )
+
+    parser.add_argument(
+        "--description",
+        default="Video keren 🚀 #fyp #viral"
+    )
+
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        default=True
+    )
+
     args = parser.parse_args()
 
     if not Path(args.cookies).exists():
-        log(f"❌ File cookies tidak ditemukan: {args.cookies}")
+
+        log(f"❌ Cookies tidak ditemukan")
+
         sys.exit(1)
 
-    download_video(args.url, VIDEO_FILE)
-    upload_to_tiktok(VIDEO_FILE, args.cookies, args.description, args.headless)
+    download_video(
+        args.url,
+        VIDEO_FILE
+    )
+
+    upload_to_tiktok(
+        VIDEO_FILE,
+        args.cookies,
+        args.description,
+        args.headless
+    )
 
 
 if __name__ == "__main__":
