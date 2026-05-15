@@ -22,7 +22,10 @@ def download_video(url):
     response = requests.get(
         url,
         stream=True,
-        timeout=60
+        timeout=60,
+        headers={
+            "User-Agent": "Mozilla/5.0"
+        }
     )
 
     response.raise_for_status()
@@ -33,7 +36,24 @@ def download_video(url):
 
     log("✅ Video downloaded")
 
-    return VIDEO_FILE
+
+def prepare_video(source):
+
+    if source.startswith("http://") or source.startswith("https://"):
+
+        download_video(source)
+
+    else:
+
+        path = Path(
+            source.replace("file://", "")
+        )
+
+        VIDEO_FILE.write_bytes(
+            path.read_bytes()
+        )
+
+        log("✅ Local video loaded")
 
 
 def load_cookies(path):
@@ -70,6 +90,8 @@ def close_popup(page):
         "button:has-text('Cancel')",
         "button:has-text('Got it')",
         "button:has-text('Close')",
+        "button:has-text('Skip')",
+        "button:has-text('Not now')",
     ]
 
     for selector in popup_buttons:
@@ -82,7 +104,7 @@ def close_popup(page):
 
                 button.click(force=True)
 
-                log(f"✅ Popup closed: {selector}")
+                log("✅ Popup closed")
 
                 time.sleep(1)
 
@@ -106,16 +128,19 @@ def fill_caption(page, text):
 
             box = page.locator(selector).first
 
-            if not box.is_visible(timeout=3000):
+            if not box.is_visible(timeout=5000):
                 continue
 
             box.click(force=True)
 
             time.sleep(1)
 
-            # CLEAR DEFAULT "video" TEXT
+            # CLEAR ALL EXISTING TEXT
             page.keyboard.press("Control+a")
-            page.keyboard.press("Delete")
+
+            time.sleep(0.5)
+
+            page.keyboard.press("Backspace")
 
             time.sleep(1)
 
@@ -123,10 +148,12 @@ def fill_caption(page, text):
 
             for word in words:
 
-                # ── HASHTAG ─────────────────────
+                # ─────────────────────────────
+                # HASHTAG
+                # ─────────────────────────────
                 if word.startswith("#"):
 
-                    # tambahkan spasi sebelum hashtag
+                    # important spacing
                     page.keyboard.press("Space")
 
                     box.press_sequentially(
@@ -136,18 +163,20 @@ def fill_caption(page, text):
 
                     time.sleep(2)
 
-                    # pilih hashtag suggestion
+                    # activate hashtag
                     page.keyboard.press("Enter")
 
                     time.sleep(1)
 
                     # IMPORTANT:
-                    # tambahkan spasi setelah hashtag
+                    # add space after hashtag
                     page.keyboard.press("Space")
 
                     time.sleep(0.5)
 
-                # ── NORMAL TEXT ─────────────────
+                # ─────────────────────────────
+                # NORMAL TEXT
+                # ─────────────────────────────
                 else:
 
                     box.press_sequentially(
@@ -157,14 +186,11 @@ def fill_caption(page, text):
 
                     time.sleep(0.2)
 
-            # EXTRA CLEANUP
-            page.keyboard.press("End")
-
-            time.sleep(1)
+            time.sleep(2)
 
             current_text = box.inner_text()
 
-            log(f"📝 Caption: {current_text}")
+            log(f"📝 Caption result: {current_text}")
 
             log("✅ Caption filled")
 
@@ -192,13 +218,17 @@ def click_post(page):
 
             button = page.locator(selector).first
 
-            if not button.is_visible(timeout=3000):
+            if not button.is_visible(timeout=5000):
                 continue
 
             disabled = button.get_attribute("disabled")
 
             if disabled is not None:
                 continue
+
+            button.scroll_into_view_if_needed()
+
+            time.sleep(1)
 
             button.click(force=True)
 
@@ -214,7 +244,7 @@ def click_post(page):
 
 def upload_video(url, cookies_path, caption, headless=True):
 
-    download_video(url)
+    prepare_video(url)
 
     with sync_playwright() as p:
 
@@ -231,7 +261,14 @@ def upload_video(url, cookies_path, caption, headless=True):
             viewport={
                 "width": 1400,
                 "height": 900
-            }
+            },
+            user_agent=(
+                "Mozilla/5.0 "
+                "(Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            )
         )
 
         context.add_cookies(
@@ -245,7 +282,7 @@ def upload_video(url, cookies_path, caption, headless=True):
         page.goto(
             TIKTOK_UPLOAD_URL,
             wait_until="domcontentloaded",
-            timeout=60000
+            timeout=120000
         )
 
         time.sleep(5)
@@ -257,24 +294,55 @@ def upload_video(url, cookies_path, caption, headless=True):
 
         close_popup(page)
 
-        log("📤 Uploading video...")
+        time.sleep(3)
 
-        page.locator(
+        # ─────────────────────────────
+        # WAIT FILE INPUT
+        # ─────────────────────────────
+        log("📤 Waiting upload input...")
+
+        file_input = page.locator(
             "input[type='file']"
-        ).first.set_input_files(
+        ).first
+
+        file_input.wait_for(
+            state="attached",
+            timeout=120000
+        )
+
+        log("✅ Upload input found")
+
+        # ─────────────────────────────
+        # UPLOAD VIDEO
+        # ─────────────────────────────
+        file_input.set_input_files(
             str(VIDEO_FILE.resolve())
         )
 
         log("⏳ Waiting upload process...")
 
-        time.sleep(25)
+        time.sleep(35)
 
         close_popup(page)
 
-        fill_caption(page, caption)
+        # remove focus from popup
+        page.mouse.click(200, 200)
 
-        time.sleep(2)
+        time.sleep(1)
 
+        # ─────────────────────────────
+        # FILL CAPTION
+        # ─────────────────────────────
+        fill_caption(
+            page,
+            caption
+        )
+
+        time.sleep(3)
+
+        # ─────────────────────────────
+        # POST
+        # ─────────────────────────────
         click_post(page)
 
         log("⏳ Waiting post process...")
@@ -290,9 +358,15 @@ def main():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--url", required=True)
+    parser.add_argument(
+        "--url",
+        required=True
+    )
 
-    parser.add_argument("--cookies", default="cookies.json")
+    parser.add_argument(
+        "--cookies",
+        default="cookies.json"
+    )
 
     parser.add_argument(
         "--description",
