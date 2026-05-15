@@ -33,7 +33,22 @@ def download_video(url):
 
     log("✅ Video downloaded")
 
-    return VIDEO_FILE
+
+def prepare_video(source):
+
+    if source.startswith("http://") or source.startswith("https://"):
+
+        download_video(source)
+
+    else:
+
+        path = Path(source.replace("file://", ""))
+
+        VIDEO_FILE.write_bytes(
+            path.read_bytes()
+        )
+
+        log("✅ Local video loaded")
 
 
 def load_cookies(path):
@@ -70,6 +85,8 @@ def close_popup(page):
         "button:has-text('Cancel')",
         "button:has-text('Got it')",
         "button:has-text('Close')",
+        "button:has-text('Skip')",
+        "button:has-text('Not now')",
     ]
 
     for selector in popup_buttons:
@@ -82,7 +99,7 @@ def close_popup(page):
 
                 button.click(force=True)
 
-                log(f"✅ Popup closed: {selector}")
+                log(f"✅ Popup closed")
 
                 time.sleep(1)
 
@@ -113,18 +130,22 @@ def fill_caption(page, text):
 
             time.sleep(1)
 
-            # clear
+            # CLEAR DEFAULT "video" TEXT
             page.keyboard.press("Control+a")
             page.keyboard.press("Delete")
+
+            time.sleep(1)
 
             words = text.split()
 
             for word in words:
 
-                # HASHTAG
+                # ── HASHTAG ─────────────────────
                 if word.startswith("#"):
 
-                    # ketik hashtag perlahan
+                    # tambahkan spasi sebelum hashtag
+                    page.keyboard.press("Space")
+
                     box.press_sequentially(
                         word,
                         delay=120
@@ -132,11 +153,18 @@ def fill_caption(page, text):
 
                     time.sleep(2)
 
-                    # pilih suggestion hashtag
+                    # pilih hashtag suggestion
                     page.keyboard.press("Enter")
 
                     time.sleep(1)
 
+                    # IMPORTANT:
+                    # tambahkan spasi setelah hashtag
+                    page.keyboard.press("Space")
+
+                    time.sleep(0.5)
+
+                # ── NORMAL TEXT ─────────────────
                 else:
 
                     box.press_sequentially(
@@ -144,7 +172,16 @@ def fill_caption(page, text):
                         delay=80
                     )
 
-            time.sleep(2)
+                    time.sleep(0.2)
+
+            # EXTRA CLEANUP
+            page.keyboard.press("End")
+
+            time.sleep(1)
+
+            current_text = box.inner_text()
+
+            log(f"📝 Caption: {current_text}")
 
             log("✅ Caption filled")
 
@@ -157,6 +194,7 @@ def fill_caption(page, text):
             continue
 
     return False
+
 
 def click_post(page):
 
@@ -193,7 +231,7 @@ def click_post(page):
 
 def upload_video(url, cookies_path, caption, headless=True):
 
-    download_video(url)
+    prepare_video(url)
 
     with sync_playwright() as p:
 
@@ -246,9 +284,14 @@ def upload_video(url, cookies_path, caption, headless=True):
 
         log("⏳ Waiting upload process...")
 
-        time.sleep(25)
+        time.sleep(35)
 
         close_popup(page)
+
+        # REMOVE RANDOM DEFAULT TEXT
+        page.mouse.click(200, 200)
+
+        time.sleep(1)
 
         fill_caption(page, caption)
 
