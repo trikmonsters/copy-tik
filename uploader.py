@@ -13,7 +13,7 @@ import argparse
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
-TIKTOK_UPLOAD_URL = "https://www.tiktok.com/upload?lang=en"
+TIKTOK_UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
 SCREENSHOT_DIR = Path("screenshots")
 VIDEO_FILE = Path("video.mp4")
 
@@ -154,6 +154,73 @@ def close_modal(page):
             pass
 
     return modal_closed
+
+
+def find_upload_input(page):
+    """Cari input file, handle hidden state dan iframe."""
+    log("🔍 Mencari file input element...")
+    
+    # ─── Attempt 1: Direct input in main page ───────────────────
+    try:
+        file_input = page.locator("input[type='file']").first
+        # Tunggu hingga attached (bukan visible, karena mungkin hidden)
+        file_input.wait_for(state="attached", timeout=10000)
+        log("✅ File input ditemukan di main page")
+        return file_input
+    except Exception as e:
+        log(f"⚠️  File input di main page tidak ditemukan: {e}")
+
+    # ─── Attempt 2: Check dalam iframe ───────────────────────────
+    try:
+        frames = page.frames
+        log(f"📍 Total frames: {len(frames)}")
+        
+        for i, frame in enumerate(frames):
+            try:
+                frame_url = frame.url if hasattr(frame, 'url') else 'unknown'
+                log(f"   Frame {i}: {frame_url}")
+                
+                file_input = frame.locator("input[type='file']").first
+                file_input.wait_for(state="attached", timeout=5000)
+                log(f"✅ File input ditemukan di frame {i}")
+                return file_input
+            except Exception:
+                continue
+    except Exception as e:
+        log(f"⚠️  Error checking frames: {e}")
+
+    # ─── Attempt 3: Klik area upload dulu untuk reveal input ─────
+    try:
+        log("🎯 Klik area upload untuk reveal file input...")
+        upload_area_selectors = [
+            "[data-e2e='upload-area']",
+            "[class*='upload']",
+            "div[class*='drag-drop']",
+            "div[class*='dropzone']",
+            ".upload-area",
+            ".jsx-2094875959",  # Dari error message
+        ]
+        
+        for sel in upload_area_selectors:
+            try:
+                area = page.locator(sel).first
+                if area.is_visible(timeout=2000):
+                    area.click()
+                    log(f"✅ Klik upload area via: {sel}")
+                    time.sleep(1)
+                    break
+            except Exception:
+                continue
+
+        # Coba lagi cari input file
+        file_input = page.locator("input[type='file']").first
+        file_input.wait_for(state="attached", timeout=10000)
+        log("✅ File input ditemukan setelah klik area upload")
+        return file_input
+    except Exception as e:
+        log(f"⚠️  Error setelah klik area: {e}")
+
+    raise Exception("❌ Input file tidak ditemukan di manapun")
 
 
 def click_caption(page, description: str):
@@ -313,20 +380,18 @@ def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
         close_modal(page)
         screenshot(page, "02_setelah_tutup_modal_awal")
 
-        # ── 3. Tunggu input file siap ─────────────────────────────
-        try:
-            page.wait_for_selector("input[type='file']", timeout=30000)
-        except PlaywrightTimeout:
-            screenshot(page, "error_input_file_tidak_ada")
-            raise Exception("❌ Input file tidak ditemukan")
+        # ── 3. Cari dan tunggu input file siap ─────────────────────
+        log("⏳ Mencari dan menunggu file input element...")
+        file_input = find_upload_input(page)
+        screenshot(page, "03_file_input_found")
 
         # ── 4. Upload video ───────────────────────────────────────
         log(f"📤 Mengupload file: {video_path}")
-        page.locator("input[type='file']").set_input_files(str(video_path.resolve()))
+        file_input.set_input_files(str(video_path.resolve()))
 
         log("⏳ Menunggu video diproses...")
         time.sleep(5)
-        screenshot(page, "03_video_diupload")
+        screenshot(page, "04_video_diupload")
 
         # ── 5. Tunggu upload complete dengan monitoring ───────────
         wait_for_upload_complete(page, timeout=120)
@@ -334,28 +399,28 @@ def upload_to_tiktok(video_path, cookies_path, description="", headless=True):
         # Tutup modal yang mungkin muncul setelah upload
         close_modal(page)
         time.sleep(3)
-        screenshot(page, "04_setelah_upload_selesai")
+        screenshot(page, "05_setelah_upload_selesai")
 
         # ── 6. Isi caption ────────────────────────────────────────
         if description:
             log(f"✏️  Mengisi caption: {description}")
             click_caption(page, description)
             time.sleep(1)
-            screenshot(page, "05_caption_diisi")
+            screenshot(page, "06_caption_diisi")
 
         # ── 7. Klik Post ──────────────────────────────────────────
         log("📮 Mencari dan klik tombol Post...")
         time.sleep(2)
-        screenshot(page, "06_sebelum_post")
+        screenshot(page, "07_sebelum_post")
 
         posted = click_post_button(page)
 
         if posted:
             time.sleep(8)
-            screenshot(page, "07_setelah_post")
+            screenshot(page, "08_setelah_post")
             log("🎉 Upload selesai!")
         else:
-            screenshot(page, "07_tombol_post_tidak_ditemukan")
+            screenshot(page, "08_tombol_post_tidak_ditemukan")
             log("⚠️  Tombol Post tidak ditemukan, cek screenshot!")
 
         browser.close()
