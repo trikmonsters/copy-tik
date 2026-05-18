@@ -1,13 +1,14 @@
 """
-TikTok Uploader - Humanized Stable Version
-Upload video ke TikTok dengan warmup session dan interaksi natural
+TikTok Uploader - Headless Humanized Version
+Upload video ke TikTok dengan warmup browsing & human-like behavior
 """
 
 import sys
+import json
 import time
 import random
-import argparse
 import requests
+import argparse
 
 from pathlib import Path
 from playwright.sync_api import (
@@ -19,11 +20,9 @@ TIKTOK_UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
 
 VIDEO_FILE = Path("video.mp4")
 
-PROFILE_DIR = "tiktok_profile"
-
 
 def log(msg: str):
-    print(f"***TikTok Uploader*** {msg}", flush=True)
+    print(f"[TikTok Uploader] {msg}", flush=True)
 
 
 def human_delay(a=0.8, b=2.5):
@@ -32,26 +31,26 @@ def human_delay(a=0.8, b=2.5):
 
 def random_mouse_movements(page):
     try:
-        for _ in range(random.randint(5, 10)):
+        for _ in range(random.randint(4, 8)):
             x = random.randint(100, 1200)
             y = random.randint(100, 700)
 
             page.mouse.move(
                 x,
                 y,
-                steps=random.randint(10, 30)
+                steps=random.randint(10, 25)
             )
 
-            human_delay(0.2, 0.8)
+            human_delay(0.2, 0.7)
 
     except:
         pass
 
 
 def warmup_session(page):
-    log("🔥 Warmup session browser...")
-
     try:
+        log("🔥 Warmup session TikTok...")
+
         page.goto(
             "https://www.tiktok.com/foryou",
             wait_until="domcontentloaded",
@@ -62,22 +61,51 @@ def warmup_session(page):
 
         random_mouse_movements(page)
 
+        # scroll video seperti user normal
         for i in range(random.randint(5, 8)):
-            log(f"📱 Scroll video {i+1}")
+            log(f"📱 Menonton video {i+1}")
 
             page.mouse.wheel(
                 0,
-                random.randint(700, 1200)
+                random.randint(700, 1300)
             )
 
-            human_delay(3, 7)
-
             random_mouse_movements(page)
+
+            human_delay(3, 7)
 
         log("✅ Warmup selesai")
 
     except Exception as e:
         log(f"⚠️ Warmup gagal: {e}")
+
+
+def post_upload_browsing(page):
+    try:
+        log("📱 Simulasi browsing setelah post...")
+
+        page.goto(
+            "https://www.tiktok.com/foryou",
+            wait_until="domcontentloaded",
+            timeout=60000
+        )
+
+        human_delay(4, 7)
+
+        for i in range(random.randint(3, 6)):
+            page.mouse.wheel(
+                0,
+                random.randint(700, 1300)
+            )
+
+            random_mouse_movements(page)
+
+            human_delay(2, 5)
+
+        log("✅ Browsing setelah post selesai")
+
+    except Exception as e:
+        log(f"⚠️ Post browsing gagal: {e}")
 
 
 def download_video(url: str, output: Path):
@@ -90,7 +118,10 @@ def download_video(url: str, output: Path):
         headers={
             "User-Agent": (
                 "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64)"
+                "(Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
             )
         }
     )
@@ -107,7 +138,37 @@ def download_video(url: str, output: Path):
     log(f"✅ Video berhasil didownload ({size_mb:.1f} MB)")
 
 
-def goto_with_retry(page, url, retries=3):
+def parse_cookies(cookies_path: str) -> list:
+    with open(cookies_path, "r", encoding="utf-8") as f:
+        content = f.read().strip()
+
+    cookies = []
+
+    if content.startswith("["):
+        raw = json.loads(content)
+
+        for c in raw:
+            expiry = c.get("expirationDate") or c.get("expires") or -1
+
+            cookies.append({
+                "name": c["name"],
+                "value": c["value"],
+                "domain": c["domain"],
+                "path": c.get("path", "/"),
+                "secure": c.get("secure", False),
+                "expires": int(expiry),
+                "httpOnly": c.get("httpOnly", False),
+            })
+
+        log(f"🍪 JSON cookies dimuat ({len(cookies)})")
+
+    else:
+        raise Exception("❌ Gunakan format cookies JSON")
+
+    return cookies
+
+
+def goto_with_retry(page, url: str, retries: int = 3):
     for attempt in range(1, retries + 1):
         try:
             log(f"🌐 Membuka halaman ({attempt}/{retries})")
@@ -124,13 +185,14 @@ def goto_with_retry(page, url, retries=3):
 
         except PlaywrightTimeout:
             log(f"⚠️ Timeout percobaan {attempt}")
+
             human_delay(2, 4)
 
     raise Exception("❌ Gagal membuka halaman")
 
 
 def close_modal(page):
-    selectors = [
+    close_selectors = [
         "[data-e2e='modal-close-inner-button']",
         "button[aria-label='Close']",
         "button:has-text('Close')",
@@ -139,7 +201,7 @@ def close_modal(page):
         "button:has-text('Cancel')",
     ]
 
-    for sel in selectors:
+    for sel in close_selectors:
         try:
             btn = page.locator(sel).first
 
@@ -178,7 +240,7 @@ def handle_content_check_popup(page):
                     popup_found = True
                     break
             except:
-                pass
+                continue
 
         if not popup_found:
             log("✅ Tidak ada popup content check")
@@ -206,7 +268,7 @@ def handle_content_check_popup(page):
                     return True
 
             except:
-                pass
+                continue
 
         page.keyboard.press("Escape")
 
@@ -239,7 +301,7 @@ def find_upload_input(page):
     return file_input
 
 
-def wait_for_upload_complete(page, timeout=300):
+def wait_for_upload_complete(page, timeout=180):
     log("⏳ Menunggu upload selesai...")
 
     start = time.time()
@@ -248,7 +310,6 @@ def wait_for_upload_complete(page, timeout=300):
         "[class*='progress']",
         "[class*='uploading']",
         "[class*='Progress']",
-        "[class*='processing']",
     ]
 
     while time.time() - start < timeout:
@@ -263,14 +324,12 @@ def wait_for_upload_complete(page, timeout=300):
                 pass
 
         if not uploading:
+            log("✅ Upload selesai")
             break
 
         human_delay(1, 3)
 
-    log("✅ Upload visual selesai")
-
-    log("⏳ Menunggu processing internal TikTok...")
-    human_delay(15, 25)
+    human_delay(5, 8)
 
 
 def fill_caption(page, text):
@@ -293,7 +352,9 @@ def fill_caption(page, text):
 
             human_delay(1, 2)
 
+            # clear existing
             page.keyboard.press("Control+a")
+
             human_delay(0.5, 1)
 
             page.keyboard.press("Backspace")
@@ -308,7 +369,7 @@ def fill_caption(page, text):
 
                     box.press_sequentially(
                         word,
-                        delay=random.randint(80, 160)
+                        delay=random.randint(90, 160)
                     )
 
                     human_delay(1, 2)
@@ -320,10 +381,10 @@ def fill_caption(page, text):
                 else:
                     box.press_sequentially(
                         word + " ",
-                        delay=random.randint(60, 140)
+                        delay=random.randint(60, 130)
                     )
 
-                    human_delay(0.1, 0.4)
+                    human_delay(0.1, 0.3)
 
             human_delay(2, 3)
 
@@ -341,6 +402,8 @@ def fill_caption(page, text):
 
         except Exception as e:
             log(f"⚠️ Caption failed: {e}")
+
+            continue
 
     return False
 
@@ -374,51 +437,42 @@ def click_post_button(page):
 
             human_delay(1, 3)
 
-            log(f"🖱 Klik Post via: {sel}")
-
             try:
-                with page.expect_response(
-                    lambda r: (
-                        "post" in r.url.lower()
-                        or "upload" in r.url.lower()
-                    ),
-                    timeout=30000
-                ) as response_info:
-
-                    btn.click(timeout=5000)
-
-                response = response_info.value
-
-                log(
-                    f"📡 API Response: "
-                    f"{response.status}"
-                )
-
+                btn.click(timeout=5000)
             except:
                 btn.click(force=True)
 
-            human_delay(5, 10)
+            log(f"✅ Tombol Post diklik via: {sel}")
 
             return True
 
-        except Exception as e:
-            log(f"⚠️ Post gagal: {e}")
+        except Exception:
+            continue
 
     return False
 
 
 def upload_to_tiktok(
     video_path,
-    description=""
+    cookies_path,
+    description="",
+    headless=True
 ):
     with sync_playwright() as p:
 
-        log("🌐 Membuka browser persistent...")
+        log("🌐 Membuka browser...")
 
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=PROFILE_DIR,
-            headless=False,
-            slow_mo=random.randint(100, 400),
+        browser = p.chromium.launch(
+            headless=headless,
+            slow_mo=random.randint(50, 150),
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--start-maximized",
+            ]
+        )
+
+        context = browser.new_context(
             viewport={
                 "width": 1366,
                 "height": 768
@@ -433,37 +487,26 @@ def upload_to_tiktok(
             locale="en-US",
             timezone_id="Asia/Jakarta",
             color_scheme="light",
-            args=[
-                "--start-maximized",
-                "--disable-dev-shm-usage",
-            ]
         )
 
-        page = context.pages[0]
+        log(f"🍪 Memuat cookies: {cookies_path}")
 
-        # debug manual
-        # page.pause()
+        cookies = parse_cookies(cookies_path)
 
-        # warmup browser
+        context.add_cookies(cookies)
+
+        page = context.new_page()
+
+        # warmup browsing
         warmup_session(page)
 
-        goto_with_retry(
-            page,
-            TIKTOK_UPLOAD_URL
-        )
+        # open upload page
+        goto_with_retry(page, TIKTOK_UPLOAD_URL)
 
-        # login manual pertama kali
         if "login" in page.url.lower():
+            raise Exception("❌ Login gagal, cookies invalid")
 
-            log("🔐 Silakan login manual TikTok...")
-            log("⌛ Menunggu login selesai...")
-
-            while "login" in page.url.lower():
-                time.sleep(3)
-
-            log("✅ Login berhasil disimpan")
-
-        human_delay(3, 6)
+        log("✅ Login berhasil")
 
         close_modal(page)
 
@@ -490,47 +533,64 @@ def upload_to_tiktok(
         if description:
             fill_caption(page, description)
 
-            human_delay(3, 6)
+            human_delay(2, 4)
 
+        # post video
         posted = click_post_button(page)
 
         if posted:
-            log("🎉 VIDEO BERHASIL DIPOST")
+            log("⏳ Menunggu redirect setelah post...")
 
-            human_delay(15, 30)
+            human_delay(10, 20)
+
+            log("🎉 UPLOAD SUCCESS")
+
+            # browsing setelah upload
+            post_upload_browsing(page)
 
         else:
-            log("❌ Gagal post video")
+            log("❌ Tombol Post gagal ditemukan")
 
-        log("⌛ Menunggu sebelum browser ditutup...")
+        human_delay(10, 20)
 
-        human_delay(20, 40)
-
-        context.close()
+        browser.close()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="TikTok Humanized Uploader"
+        description="Upload video ke TikTok"
     )
 
     parser.add_argument(
         "--url",
-        default=(
-            "https://v1.pinimg.com/videos/iht/"
-            "expMp4/b7/b4/4b/"
-            "b7b44b6222612c40a5b30fd7e991cb4f_720w.mp4"
-        ),
+        required=True,
         help="URL video"
     )
 
     parser.add_argument(
+        "--cookies",
+        default="cookies.json",
+        help="Path cookies JSON"
+    )
+
+    parser.add_argument(
         "--description",
-        default="Video keren 🚀 #fyp #viralvideo",
-        help="Caption"
+        default="Video keren 🚀 #fyp #viral",
+        help="Caption video"
+    )
+
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        default=True,
+        help="Headless mode"
     )
 
     args = parser.parse_args()
+
+    if not Path(args.cookies).exists():
+        log(f"❌ Cookies tidak ditemukan: {args.cookies}")
+        sys.exit(1)
 
     download_video(
         args.url,
@@ -539,7 +599,9 @@ def main():
 
     upload_to_tiktok(
         VIDEO_FILE,
-        args.description
+        args.cookies,
+        args.description,
+        args.headless
     )
 
 
