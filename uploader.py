@@ -1,6 +1,6 @@
 """
-TikTok Uploader - Headless Humanized Version
-Upload video ke TikTok dengan warmup browsing & human-like behavior
+TikTok Draft Uploader
+Upload video -> isi caption -> save draft -> close browser
 """
 
 import sys
@@ -22,94 +22,15 @@ VIDEO_FILE = Path("video.mp4")
 
 
 def log(msg: str):
-    print(f"[TikTok Uploader] {msg}", flush=True)
+    print(f"[TikTok Draft Uploader] {msg}", flush=True)
 
 
 def human_delay(a=0.8, b=2.5):
     time.sleep(random.uniform(a, b))
 
 
-def random_mouse_movements(page):
-    try:
-        for _ in range(random.randint(4, 8)):
-            x = random.randint(100, 1200)
-            y = random.randint(100, 700)
-
-            page.mouse.move(
-                x,
-                y,
-                steps=random.randint(10, 25)
-            )
-
-            human_delay(0.2, 0.7)
-
-    except:
-        pass
-
-
-def warmup_session(page):
-    try:
-        log("🔥 Warmup session TikTok...")
-
-        page.goto(
-            "https://www.tiktok.com/foryou",
-            wait_until="domcontentloaded",
-            timeout=60000
-        )
-
-        human_delay(5, 8)
-
-        random_mouse_movements(page)
-
-        # scroll video seperti user normal
-        for i in range(random.randint(5, 8)):
-            log(f"📱 Menonton video {i+1}")
-
-            page.mouse.wheel(
-                0,
-                random.randint(700, 1300)
-            )
-
-            random_mouse_movements(page)
-
-            human_delay(3, 7)
-
-        log("✅ Warmup selesai")
-
-    except Exception as e:
-        log(f"⚠️ Warmup gagal: {e}")
-
-
-def post_upload_browsing(page):
-    try:
-        log("📱 Simulasi browsing setelah post...")
-
-        page.goto(
-            "https://www.tiktok.com/foryou",
-            wait_until="domcontentloaded",
-            timeout=60000
-        )
-
-        human_delay(4, 7)
-
-        for i in range(random.randint(3, 6)):
-            page.mouse.wheel(
-                0,
-                random.randint(700, 1300)
-            )
-
-            random_mouse_movements(page)
-
-            human_delay(2, 5)
-
-        log("✅ Browsing setelah post selesai")
-
-    except Exception as e:
-        log(f"⚠️ Post browsing gagal: {e}")
-
-
 def download_video(url: str, output: Path):
-    log(f"⬇️ Mendownload video dari: {url}")
+    log(f"⬇️ Download video: {url}")
 
     response = requests.get(
         url,
@@ -135,7 +56,7 @@ def download_video(url: str, output: Path):
 
     size_mb = output.stat().st_size / (1024 * 1024)
 
-    log(f"✅ Video berhasil didownload ({size_mb:.1f} MB)")
+    log(f"✅ Download selesai ({size_mb:.1f} MB)")
 
 
 def parse_cookies(cookies_path: str) -> list:
@@ -160,10 +81,10 @@ def parse_cookies(cookies_path: str) -> list:
                 "httpOnly": c.get("httpOnly", False),
             })
 
-        log(f"🍪 JSON cookies dimuat ({len(cookies)})")
+        log(f"🍪 Cookies dimuat ({len(cookies)})")
 
     else:
-        raise Exception("❌ Gunakan format cookies JSON")
+        raise Exception("❌ Gunakan cookies format JSON")
 
     return cookies
 
@@ -179,7 +100,7 @@ def goto_with_retry(page, url: str, retries: int = 3):
                 timeout=60000
             )
 
-            human_delay(3, 6)
+            human_delay(3, 5)
 
             return
 
@@ -206,8 +127,6 @@ def close_modal(page):
             btn = page.locator(sel).first
 
             if btn.is_visible(timeout=1500):
-                random_mouse_movements(page)
-
                 btn.click(force=True)
 
                 log(f"✅ Modal ditutup via: {sel}")
@@ -224,8 +143,6 @@ def close_modal(page):
 
 def handle_content_check_popup(page):
     try:
-        log("🔍 Memeriksa popup content check...")
-
         popup_selectors = [
             "text=Turn on automatic content checks",
             "text=Music copyright check",
@@ -243,7 +160,6 @@ def handle_content_check_popup(page):
                 continue
 
         if not popup_found:
-            log("✅ Tidak ada popup content check")
             return False
 
         cancel_selectors = [
@@ -257,13 +173,11 @@ def handle_content_check_popup(page):
                 btn = page.locator(sel).first
 
                 if btn.is_visible(timeout=3000):
-                    random_mouse_movements(page)
-
                     btn.click(force=True)
 
                     log(f"✅ Popup ditutup via: {sel}")
 
-                    human_delay(2, 3)
+                    human_delay(1, 2)
 
                     return True
 
@@ -272,20 +186,14 @@ def handle_content_check_popup(page):
 
         page.keyboard.press("Escape")
 
-        log("✅ Popup ditutup via Escape")
-
-        human_delay(1, 2)
-
         return True
 
-    except Exception as e:
-        log(f"⚠️ Error popup: {e}")
-
+    except:
         return False
 
 
 def find_upload_input(page):
-    log("🔍 Mencari input upload...")
+    log("🔍 Mencari file input...")
 
     file_input = page.locator(
         "input[type='file']"
@@ -327,9 +235,9 @@ def wait_for_upload_complete(page, timeout=180):
             log("✅ Upload selesai")
             break
 
-        human_delay(1, 3)
+        human_delay(1, 2)
 
-    human_delay(5, 8)
+    human_delay(4, 6)
 
 
 def fill_caption(page, text):
@@ -346,13 +254,10 @@ def fill_caption(page, text):
             if not box.is_visible(timeout=5000):
                 continue
 
-            random_mouse_movements(page)
-
             box.click(force=True)
 
             human_delay(1, 2)
 
-            # clear existing
             page.keyboard.press("Control+a")
 
             human_delay(0.5, 1)
@@ -369,53 +274,38 @@ def fill_caption(page, text):
 
                     box.press_sequentially(
                         word,
-                        delay=random.randint(90, 160)
+                        delay=random.randint(70, 130)
                     )
 
-                    human_delay(1, 2)
+                    human_delay(0.5, 1)
 
                     page.keyboard.press("Enter")
-
-                    human_delay(0.5, 1)
 
                 else:
                     box.press_sequentially(
                         word + " ",
-                        delay=random.randint(60, 130)
+                        delay=random.randint(50, 110)
                     )
 
-                    human_delay(0.1, 0.3)
-
-            human_delay(2, 3)
-
-            try:
-                current_text = box.inner_text()
-
-                log(f"📝 Caption result: {current_text}")
-
-            except:
-                pass
-
-            log("✅ Caption filled")
+            log("✅ Caption berhasil diisi")
 
             return True
 
         except Exception as e:
-            log(f"⚠️ Caption failed: {e}")
+            log(f"⚠️ Caption gagal: {e}")
 
             continue
 
     return False
 
 
-def click_post_button(page):
-    log("📮 Mencari tombol Post...")
+def click_draft_button(page):
+    log("📂 Mencari tombol Draft...")
 
     selectors = [
-        "[data-e2e='post_video_button']",
-        "button[data-e2e='submit-button']",
-        "button:has-text('Post')",
-        "button:has-text('Posting')",
+        "button:has-text('Draft')",
+        "button:has-text('Save draft')",
+        "[data-e2e='save-draft-button']",
     ]
 
     for sel in selectors:
@@ -428,25 +318,23 @@ def click_post_button(page):
             disabled = btn.get_attribute("disabled")
 
             if disabled is not None:
-                log("⏳ Tombol Post masih disabled")
+                log("⏳ Tombol Draft masih disabled")
                 continue
 
             btn.scroll_into_view_if_needed()
 
-            random_mouse_movements(page)
-
-            human_delay(1, 3)
+            human_delay(1, 2)
 
             try:
                 btn.click(timeout=5000)
             except:
                 btn.click(force=True)
 
-            log(f"✅ Tombol Post diklik via: {sel}")
+            log(f"✅ Draft diklik via: {sel}")
 
             return True
 
-        except Exception:
+        except:
             continue
 
     return False
@@ -455,16 +343,15 @@ def click_post_button(page):
 def upload_to_tiktok(
     video_path,
     cookies_path,
-    description="",
-    headless=True
+    description=""
 ):
     with sync_playwright() as p:
 
         log("🌐 Membuka browser...")
 
         browser = p.chromium.launch(
-            headless=headless,
-            slow_mo=random.randint(50, 150),
+            headless=False,
+            slow_mo=random.randint(50, 120),
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
@@ -497,10 +384,7 @@ def upload_to_tiktok(
 
         page = context.new_page()
 
-        # warmup browsing
-        warmup_session(page)
-
-        # open upload page
+        # langsung ke upload
         goto_with_retry(page, TIKTOK_UPLOAD_URL)
 
         if "login" in page.url.lower():
@@ -510,19 +394,15 @@ def upload_to_tiktok(
 
         close_modal(page)
 
-        random_mouse_movements(page)
-
         file_input = find_upload_input(page)
 
         log(f"📤 Uploading: {video_path}")
-
-        human_delay(2, 5)
 
         file_input.set_input_files(
             str(video_path.resolve())
         )
 
-        human_delay(4, 7)
+        human_delay(3, 5)
 
         wait_for_upload_complete(page)
 
@@ -533,32 +413,29 @@ def upload_to_tiktok(
         if description:
             fill_caption(page, description)
 
-            human_delay(2, 4)
+            human_delay(2, 3)
 
-        # post video
-        posted = click_post_button(page)
+        # save draft
+        drafted = click_draft_button(page)
 
-        if posted:
-            log("⏳ Menunggu redirect setelah post...")
+        if drafted:
+            log("⏳ Menunggu save draft...")
 
-            human_delay(10, 20)
+            human_delay(8, 15)
 
-            log("🎉 UPLOAD SUCCESS")
-
-            # browsing setelah upload
-            post_upload_browsing(page)
+            log("✅ VIDEO BERHASIL MASUK DRAFT")
 
         else:
-            log("❌ Tombol Post gagal ditemukan")
+            log("❌ Tombol Draft gagal ditemukan")
 
-        human_delay(10, 20)
+        human_delay(3, 5)
 
         browser.close()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Upload video ke TikTok"
+        description="TikTok Draft Uploader"
     )
 
     parser.add_argument(
@@ -579,13 +456,6 @@ def main():
         help="Caption video"
     )
 
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        default=True,
-        help="Headless mode"
-    )
-
     args = parser.parse_args()
 
     if not Path(args.cookies).exists():
@@ -600,8 +470,7 @@ def main():
     upload_to_tiktok(
         VIDEO_FILE,
         args.cookies,
-        args.description,
-        args.headless
+        args.description
     )
 
 
