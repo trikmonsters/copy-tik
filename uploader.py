@@ -1,13 +1,13 @@
 """
-TikTok Uploader - REAL Draft Save Version
-Upload video ke TikTok lalu save sebagai draft sungguhan
+TikTok Uploader - Humanized Stable Version
+Upload video ke TikTok dengan warmup session dan interaksi natural
 """
 
 import sys
-import json
 import time
-import requests
+import random
 import argparse
+import requests
 
 from pathlib import Path
 from playwright.sync_api import (
@@ -16,11 +16,68 @@ from playwright.sync_api import (
 )
 
 TIKTOK_UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
+
 VIDEO_FILE = Path("video.mp4")
+
+PROFILE_DIR = "tiktok_profile"
 
 
 def log(msg: str):
     print(f"***TikTok Uploader*** {msg}", flush=True)
+
+
+def human_delay(a=0.8, b=2.5):
+    time.sleep(random.uniform(a, b))
+
+
+def random_mouse_movements(page):
+    try:
+        for _ in range(random.randint(5, 10)):
+            x = random.randint(100, 1200)
+            y = random.randint(100, 700)
+
+            page.mouse.move(
+                x,
+                y,
+                steps=random.randint(10, 30)
+            )
+
+            human_delay(0.2, 0.8)
+
+    except:
+        pass
+
+
+def warmup_session(page):
+    log("🔥 Warmup session browser...")
+
+    try:
+        page.goto(
+            "https://www.tiktok.com/foryou",
+            wait_until="domcontentloaded",
+            timeout=60000
+        )
+
+        human_delay(5, 8)
+
+        random_mouse_movements(page)
+
+        for i in range(random.randint(5, 8)):
+            log(f"📱 Scroll video {i+1}")
+
+            page.mouse.wheel(
+                0,
+                random.randint(700, 1200)
+            )
+
+            human_delay(3, 7)
+
+            random_mouse_movements(page)
+
+        log("✅ Warmup selesai")
+
+    except Exception as e:
+        log(f"⚠️ Warmup gagal: {e}")
 
 
 def download_video(url: str, output: Path):
@@ -32,7 +89,8 @@ def download_video(url: str, output: Path):
         timeout=60,
         headers={
             "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                "Mozilla/5.0 "
+                "(Windows NT 10.0; Win64; x64)"
             )
         }
     )
@@ -49,35 +107,6 @@ def download_video(url: str, output: Path):
     log(f"✅ Video berhasil didownload ({size_mb:.1f} MB)")
 
 
-def parse_cookies(cookies_path: str):
-    with open(cookies_path, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-
-    if not content.startswith("["):
-        raise Exception("❌ Gunakan cookies JSON")
-
-    raw = json.loads(content)
-
-    cookies = []
-
-    for c in raw:
-        expiry = c.get("expirationDate") or c.get("expires") or -1
-
-        cookies.append({
-            "name": c["name"],
-            "value": c["value"],
-            "domain": c["domain"],
-            "path": c.get("path", "/"),
-            "secure": c.get("secure", False),
-            "expires": int(expiry),
-            "httpOnly": c.get("httpOnly", False),
-        })
-
-    log(f"🍪 JSON cookies dimuat ({len(cookies)})")
-
-    return cookies
-
-
 def goto_with_retry(page, url, retries=3):
     for attempt in range(1, retries + 1):
         try:
@@ -89,13 +118,13 @@ def goto_with_retry(page, url, retries=3):
                 timeout=60000
             )
 
-            time.sleep(5)
+            human_delay(3, 6)
 
             return
 
         except PlaywrightTimeout:
             log(f"⚠️ Timeout percobaan {attempt}")
-            time.sleep(3)
+            human_delay(2, 4)
 
     raise Exception("❌ Gagal membuka halaman")
 
@@ -115,11 +144,13 @@ def close_modal(page):
             btn = page.locator(sel).first
 
             if btn.is_visible(timeout=1500):
+                random_mouse_movements(page)
+
                 btn.click(force=True)
 
                 log(f"✅ Modal ditutup via: {sel}")
 
-                time.sleep(1)
+                human_delay(1, 2)
 
                 return True
 
@@ -164,11 +195,13 @@ def handle_content_check_popup(page):
                 btn = page.locator(sel).first
 
                 if btn.is_visible(timeout=3000):
+                    random_mouse_movements(page)
+
                     btn.click(force=True)
 
                     log(f"✅ Popup ditutup via: {sel}")
 
-                    time.sleep(2)
+                    human_delay(2, 3)
 
                     return True
 
@@ -179,7 +212,7 @@ def handle_content_check_popup(page):
 
         log("✅ Popup ditutup via Escape")
 
-        time.sleep(2)
+        human_delay(1, 2)
 
         return True
 
@@ -192,7 +225,9 @@ def handle_content_check_popup(page):
 def find_upload_input(page):
     log("🔍 Mencari input upload...")
 
-    file_input = page.locator("input[type='file']").first
+    file_input = page.locator(
+        "input[type='file']"
+    ).first
 
     file_input.wait_for(
         state="attached",
@@ -230,13 +265,12 @@ def wait_for_upload_complete(page, timeout=300):
         if not uploading:
             break
 
-        time.sleep(2)
+        human_delay(1, 3)
 
     log("✅ Upload visual selesai")
 
-    # penting
     log("⏳ Menunggu processing internal TikTok...")
-    time.sleep(15)
+    human_delay(15, 25)
 
 
 def fill_caption(page, text):
@@ -253,16 +287,18 @@ def fill_caption(page, text):
             if not box.is_visible(timeout=5000):
                 continue
 
+            random_mouse_movements(page)
+
             box.click(force=True)
 
-            time.sleep(1)
+            human_delay(1, 2)
 
             page.keyboard.press("Control+a")
-            time.sleep(0.5)
+            human_delay(0.5, 1)
 
             page.keyboard.press("Backspace")
 
-            time.sleep(1)
+            human_delay(1, 2)
 
             words = text.split()
 
@@ -272,24 +308,24 @@ def fill_caption(page, text):
 
                     box.press_sequentially(
                         word,
-                        delay=120
+                        delay=random.randint(80, 160)
                     )
 
-                    time.sleep(2)
+                    human_delay(1, 2)
 
                     page.keyboard.press("Enter")
 
-                    time.sleep(0.5)
+                    human_delay(0.5, 1)
 
                 else:
                     box.press_sequentially(
                         word + " ",
-                        delay=80
+                        delay=random.randint(60, 140)
                     )
 
-                    time.sleep(0.2)
+                    human_delay(0.1, 0.4)
 
-            time.sleep(2)
+            human_delay(2, 3)
 
             try:
                 current_text = box.inner_text()
@@ -309,15 +345,14 @@ def fill_caption(page, text):
     return False
 
 
-def click_draft_button(page):
-    log("📂 Mencari tombol Draft...")
+def click_post_button(page):
+    log("📮 Mencari tombol Post...")
 
     selectors = [
-        "button:has-text('Draft')",
-        "button:has-text('Save draft')",
-        "button:has-text('Save Draft')",
-        "button[data-e2e='save-draft-button']",
-        "[data-e2e='draft-button']",
+        "[data-e2e='post_video_button']",
+        "button[data-e2e='submit-button']",
+        "button:has-text('Post')",
+        "button:has-text('Posting')",
     ]
 
     for sel in selectors:
@@ -330,168 +365,121 @@ def click_draft_button(page):
             disabled = btn.get_attribute("disabled")
 
             if disabled is not None:
-                log("⏳ Tombol Draft disabled")
+                log("⏳ Tombol Post masih disabled")
                 continue
 
             btn.scroll_into_view_if_needed()
 
-            time.sleep(2)
+            random_mouse_movements(page)
 
-            log(f"🖱 Klik draft via: {sel}")
+            human_delay(1, 3)
+
+            log(f"🖱 Klik Post via: {sel}")
 
             try:
                 with page.expect_response(
                     lambda r: (
-                        "draft" in r.url.lower()
-                        or "save" in r.url.lower()
-                        or "post" in r.url.lower()
+                        "post" in r.url.lower()
+                        or "upload" in r.url.lower()
                     ),
-                    timeout=15000
+                    timeout=30000
                 ) as response_info:
 
-                    try:
-                        btn.click(timeout=5000)
-                    except:
-                        btn.click(force=True)
+                    btn.click(timeout=5000)
 
                 response = response_info.value
 
                 log(
                     f"📡 API Response: "
-                    f"{response.status} -> {response.url}"
+                    f"{response.status}"
                 )
 
-            except Exception as api_error:
-                log(f"⚠️ Tidak ada API terdeteksi: {api_error}")
+            except:
+                btn.click(force=True)
 
-                try:
-                    btn.click(force=True)
-                except:
-                    pass
+            human_delay(5, 10)
 
-            time.sleep(5)
-
-            # confirm popup
-            confirm_selectors = [
-                "button:has-text('Save')",
-                "button:has-text('Confirm')",
-                "button:has-text('OK')",
-            ]
-
-            for csel in confirm_selectors:
-                try:
-                    cbtn = page.locator(csel).first
-
-                    if cbtn.is_visible(timeout=3000):
-                        cbtn.click(force=True)
-
-                        log(f"✅ Confirm clicked: {csel}")
-
-                        time.sleep(5)
-
-                        break
-
-                except:
-                    pass
-
-            # cek toast sukses
-            success_texts = [
-                "Saved to drafts",
-                "Draft saved",
-                "Successfully saved",
-                "Saved",
-            ]
-
-            for text in success_texts:
-                try:
-                    if page.locator(
-                        f"text={text}"
-                    ).is_visible(timeout=5000):
-
-                        log(f"✅ Draft confirmed: {text}")
-
-                        return True
-
-                except:
-                    pass
-
-            # fallback
-            current_url = page.url.lower()
-
-            if (
-                "studio" in current_url
-                or "upload" in current_url
-            ):
-                log("✅ Draft kemungkinan berhasil")
-
-                return True
+            return True
 
         except Exception as e:
-            log(f"⚠️ Draft gagal: {e}")
+            log(f"⚠️ Post gagal: {e}")
 
     return False
 
 
 def upload_to_tiktok(
     video_path,
-    cookies_path,
-    description="",
-    headless=False
+    description=""
 ):
     with sync_playwright() as p:
-        log("🌐 Membuka browser...")
 
-        browser = p.chromium.launch(
-            headless=headless,
-            slow_mo=500,
-            args=[
-                "--start-maximized",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-            ]
-        )
+        log("🌐 Membuka browser persistent...")
 
-        context = browser.new_context(
-            viewport={"width": 1400, "height": 900},
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR,
+            headless=False,
+            slow_mo=random.randint(100, 400),
+            viewport={
+                "width": 1366,
+                "height": 768
+            },
             user_agent=(
                 "Mozilla/5.0 "
                 "(Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 "
                 "(KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
+                "Chrome/124.0.0.0 Safari/537.36"
             ),
+            locale="en-US",
+            timezone_id="Asia/Jakarta",
+            color_scheme="light",
+            args=[
+                "--start-maximized",
+                "--disable-dev-shm-usage",
+            ]
         )
 
-        log(f"🍪 Memuat cookies: {cookies_path}")
-
-        cookies = parse_cookies(cookies_path)
-
-        context.add_cookies(cookies)
-
-        page = context.new_page()
+        page = context.pages[0]
 
         # debug manual
         # page.pause()
 
-        goto_with_retry(page, TIKTOK_UPLOAD_URL)
+        # warmup browser
+        warmup_session(page)
 
+        goto_with_retry(
+            page,
+            TIKTOK_UPLOAD_URL
+        )
+
+        # login manual pertama kali
         if "login" in page.url.lower():
-            raise Exception("❌ Login gagal, cookies invalid")
 
-        log("✅ Login berhasil")
+            log("🔐 Silakan login manual TikTok...")
+            log("⌛ Menunggu login selesai...")
+
+            while "login" in page.url.lower():
+                time.sleep(3)
+
+            log("✅ Login berhasil disimpan")
+
+        human_delay(3, 6)
 
         close_modal(page)
+
+        random_mouse_movements(page)
 
         file_input = find_upload_input(page)
 
         log(f"📤 Uploading: {video_path}")
 
+        human_delay(2, 5)
+
         file_input.set_input_files(
             str(video_path.resolve())
         )
 
-        time.sleep(5)
+        human_delay(4, 7)
 
         wait_for_upload_complete(page)
 
@@ -502,43 +490,28 @@ def upload_to_tiktok(
         if description:
             fill_caption(page, description)
 
-            time.sleep(3)
+            human_delay(3, 6)
 
-        drafted = click_draft_button(page)
+        posted = click_post_button(page)
 
-        if drafted:
-            log("⏳ Menunggu save draft async...")
-            time.sleep(30)
+        if posted:
+            log("🎉 VIDEO BERHASIL DIPOST")
 
-            log("🎉 VIDEO BERHASIL DISIMPAN KE DRAFT")
+            human_delay(15, 30)
 
         else:
-            log("❌ Draft gagal")
-
-            try:
-                html = page.content()
-
-                with open(
-                    "debug.html",
-                    "w",
-                    encoding="utf-8"
-                ) as f:
-                    f.write(html)
-
-                log("🛠 debug.html berhasil dibuat")
-
-            except:
-                pass
+            log("❌ Gagal post video")
 
         log("⌛ Menunggu sebelum browser ditutup...")
-        time.sleep(30)
 
-        browser.close()
+        human_delay(20, 40)
+
+        context.close()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Upload TikTok sebagai draft"
+        description="TikTok Humanized Uploader"
     )
 
     parser.add_argument(
@@ -552,37 +525,21 @@ def main():
     )
 
     parser.add_argument(
-        "--cookies",
-        default="cookies.json",
-        help="Cookies JSON"
-    )
-
-    parser.add_argument(
         "--description",
         default="Video keren 🚀 #fyp #viralvideo",
-        help="Caption video"
-    )
-
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        default=False,
-        help="Headless mode"
+        help="Caption"
     )
 
     args = parser.parse_args()
 
-    if not Path(args.cookies).exists():
-        log(f"❌ Cookies tidak ditemukan: {args.cookies}")
-        sys.exit(1)
-
-    download_video(args.url, VIDEO_FILE)
+    download_video(
+        args.url,
+        VIDEO_FILE
+    )
 
     upload_to_tiktok(
         VIDEO_FILE,
-        args.cookies,
-        args.description,
-        args.headless
+        args.description
     )
 
 
