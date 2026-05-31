@@ -1,4 +1,4 @@
-name: FFmpeg Test
+name: FFmpeg Crop 20 Percent
 
 on:
   workflow_dispatch:
@@ -16,32 +16,32 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg bc
+          sudo apt install -y ffmpeg bc wget
 
       - name: Download Video
         run: |
           wget -O input.mp4 "https://v1.pinimg.com/videos/mc/720p/da/68/d9/da68d926f31eb7a2e977d2e69c23719d.mp4"
 
-      - name: Get Duration
+      - name: Calculate Duration Minus 3 Seconds
         run: |
           DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 input.mp4)
           NEW_DURATION=$(echo "$DURATION-3" | bc)
           echo "NEW_DURATION=$NEW_DURATION" >> $GITHUB_ENV
 
-      - name: Process Video
+      - name: Crop 20 Percent + Cut Last 3 Seconds
         run: |
           ffmpeg -y \
-          -i input.mp4 \
-          -t $NEW_DURATION \
-          -vf "crop=iw*0.98:ih*0.98:(iw-iw*0.98)/2:(ih-ih*0.98)/2,scale=iw:ih" \
-          -c:v libx264 \
-          -crf 20 \
-          -preset medium \
-          -c:a aac \
-          -b:a 192k \
-          output.mp4
+            -i input.mp4 \
+            -t $NEW_DURATION \
+            -vf "crop=iw*0.8:ih*0.8:(iw-iw*0.8)/2:(ih-ih*0.8)/2,scale=iw:ih" \
+            -c:v libx264 \
+            -crf 18 \
+            -preset medium \
+            -c:a aac \
+            -b:a 192k \
+            output.mp4
 
-      - name: Create Release Tag
+      - name: Create Tag
         id: tag
         run: |
           TAG=test-$(date +%s)
